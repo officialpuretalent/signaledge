@@ -1,0 +1,5 @@
+FROM n8nio/n8n:latest
+
+# Railway mounts volumes as root-owned, which the default `node` user
+# cannot write to. Running as root resolves the permission error.
+USER root
