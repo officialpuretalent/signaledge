@@ -125,17 +125,19 @@ N8N_PORT         = 5678
 
 Switch providers by setting `AI_PROVIDER` on the Railway signal-api service:
 
-| Provider | Env var | Default model | Notes |
-|----------|---------|--------------|-------|
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | Default |
-| `openai` | `OPENAI_API_KEY` | `gpt-4o` | |
-| `gemini` | `GEMINI_API_KEY` | `gemini-2.0-flash` | |
+| Provider | Env var | Default model | Flagship (override) |
+|----------|---------|--------------|---------------------|
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | `claude-opus-4-6` |
+| `openai` | `OPENAI_API_KEY` | `gpt-5.4-mini` | `gpt-5.4` |
+| `gemini` | `GEMINI_API_KEY` | `gemini-2.5-flash` | `gemini-2.5-pro` |
+
+> **March 2026 notes:** GPT-4o was retired February 2026. `gemini-2.0-flash` is deprecated (retires June 2026). Defaults have been updated accordingly.
 
 Override the model with `AI_MODEL=model-name`. Example:
 
 ```
 AI_PROVIDER = openai
-AI_MODEL    = gpt-4o-mini    # cheaper for high-frequency testing
+AI_MODEL    = gpt-5.4-mini    # affordable — ~$0.75/1M input tokens
 ```
 
 ---

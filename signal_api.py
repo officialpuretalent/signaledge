@@ -13,14 +13,19 @@ Endpoints:
   POST /signals/ai          — signals + AI confidence scoring
 
 AI provider is selected via the AI_PROVIDER environment variable:
-  AI_PROVIDER=anthropic  →  Claude  (requires ANTHROPIC_API_KEY)
-  AI_PROVIDER=openai     →  GPT-4o  (requires OPENAI_API_KEY)
-  AI_PROVIDER=gemini     →  Gemini  (requires GEMINI_API_KEY)
+  AI_PROVIDER=anthropic  →  Claude        (requires ANTHROPIC_API_KEY)
+  AI_PROVIDER=openai     →  GPT-5.4-mini  (requires OPENAI_API_KEY)
+  AI_PROVIDER=gemini     →  Gemini 2.5    (requires GEMINI_API_KEY)
 
-Optionally override the specific model with AI_MODEL:
-  AI_MODEL=claude-opus-4-6
-  AI_MODEL=gpt-4o-mini
-  AI_MODEL=gemini-2.0-flash
+Default models (as of March 2026):
+  anthropic → claude-sonnet-4-6      (Sonnet 4.6 — best speed/quality balance)
+  openai    → gpt-5.4-mini           (GPT-4o retired Feb 2026; 5.4-mini is affordable tier)
+  gemini    → gemini-2.5-flash       (2.0-flash deprecated June 2026; 2.5 Flash is stable)
+
+Override with AI_MODEL env var:
+  AI_MODEL=claude-opus-4-6           (Anthropic flagship)
+  AI_MODEL=gpt-5.4                   (OpenAI flagship)
+  AI_MODEL=gemini-2.5-pro            (Gemini flagship)
 """
 
 import os
@@ -43,11 +48,20 @@ app.add_middleware(
 # ── AI provider config ────────────────────────────────────────────────────────
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "anthropic").lower()
 
+# Default models — updated March 2026
+# Anthropic: Sonnet 4.6 — best speed/intelligence balance, 1M context
+# OpenAI:    GPT-5.4-mini — GPT-4o retired Feb 2026; 5.4-mini is affordable production tier
+# Gemini:    2.5 Flash — gemini-2.0-flash deprecated June 2026; 2.5 Flash is current stable
 _DEFAULT_MODEL = {
     "anthropic": "claude-sonnet-4-6",
-    "openai":    "gpt-4o",
-    "gemini":    "gemini-2.0-flash",
+    "openai":    "gpt-5.4-mini",
+    "gemini":    "gemini-2.5-flash",
 }
+
+# Flagship models if you want maximum quality (higher cost):
+# anthropic → claude-opus-4-6
+# openai    → gpt-5.4
+# gemini    → gemini-2.5-pro
 
 AI_MODEL = os.environ.get("AI_MODEL") or _DEFAULT_MODEL.get(AI_PROVIDER, "")
 
@@ -121,7 +135,7 @@ Signal:
   Stop Loss:  {sig['sl']}  (risk: {risk})
   Take Profit:{sig['tp']}  (reward: {reward})
   R:R Ratio:  {p['rr_ratio']}:1
-  SL:         {p['sl_mult']}× ATR(14)
+  SL:         {p['sl_mult']}x ATR(14)
 
 Indicators at signal bar:
   RSI:        {ind['rsi']}
