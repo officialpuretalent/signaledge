@@ -31,8 +31,10 @@
       "id": "3",
       "name": "Filter active signals",
       "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [720, 300],
       "parameters": {
+        "mode": "runOnceForAllItems",
         "jsCode": "const ACTIVE_PAIRS = ['EUR/USD', 'USD/JPY', 'AUD/JPY', 'USD/CAD'];\nconst raw = $input.first().json;\nconst filtered = (raw.signals || []).filter(s =>\n  ACTIVE_PAIRS.includes(s.pair) && !['none','error','duplicate'].includes(s.signal)\n);\nreturn [{ json: { ...raw, signals: filtered, active_count: filtered.length } }];"
       }
     },
@@ -55,8 +57,10 @@
       "id": "5",
       "name": "Format Each Signal",
       "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [1200, 200],
       "parameters": {
+        "mode": "runOnceForAllItems",
         "jsCode": "const signals = $input.first().json.signals;\nconst messages = [];\n\nfor (const s of signals) {\n  const ai     = s.ai || {};\n  const params = s.params || {};\n  const emoji  = ai.emoji || '📊';\n  const conf   = ai.confidence != null ? `${ai.confidence}%` : '—';\n  const quality = ai.quality || '—';\n  const risks  = (ai.key_risks || []).map(r => `  • ${r}`).join('\\n');\n  const rr     = params.rr_ratio || 2.5;\n  const direction = s.signal === 'long' ? '🟢 LONG' : '🔴 SHORT';\n\n  const msg = [\n    `${emoji} *${s.pair}* — ${direction}`,\n    `Strategy: \\`${s.strategy}\\``,\n    ``,\n    `Entry:  \\`${s.entry}\\``,\n    `SL:     \\`${s.sl}\\`  (${params.sl_mult || 2}× ATR)`,\n    `TP:     \\`${s.tp}\\`  (${rr}R)`,\n    ``,\n    `Indicators: ADX ${s.indicators?.adx} · DI-spread ${s.indicators?.di_spread} · RSI ${s.indicators?.rsi}`,\n    `Params: ADX≥${params.adx_min} · DI-spread≥${params.di_spread_min}`,\n    ``,\n    `AI Confidence: *${conf}* (${quality})`,\n    ai.summary ? `💬 ${ai.summary}` : '',\n    risks ? `\\n⚠️ Risks:\\n${risks}` : '',\n    ``,\n    `📅 Bar: ${s.bar_time} SAST`,\n    `🤖 Signal Engine · Optimized`,\n  ].filter(Boolean).join('\\n');\n\n  messages.push({ json: { text: msg, pair: s.pair, signal: s.signal } });\n}\n\nreturn messages;"
       }
     },
@@ -131,8 +135,10 @@
       "id": "10",
       "name": "Format Error Alert",
       "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [960, 480],
       "parameters": {
+        "mode": "runOnceForAllItems",
         "jsCode": "const errors = $input.first().json.errors || [];\nconst lines = errors.map(e => `  • ${e.pair}: ${e.error || 'unknown error'}`);\nconst text = `⚠️ *SignalEdge Data Feed Error*\\n\\nThe following pairs failed to fetch:\\n${lines.join('\\n')}\\n\\n📅 ${new Date().toISOString().replace('T',' ').slice(0,19)} UTC`;\nreturn [{ json: { text } }];"
       }
     },
