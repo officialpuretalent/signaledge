@@ -115,11 +115,15 @@ def signals_with_ai():
         "errors":  len(errors),
     })
 
+    # All pairs including none/duplicate — used by n8n for the no-signal market summary
+    market_snapshot = [s for s in results if s["signal"] != "error"]
+
     return {
-        "generated":    dt.datetime.now(SAST).isoformat(),
-        "ai_provider":  AI_PROVIDER,
-        "ai_model":     AI_MODEL,
-        "active_count": len(enriched),
-        "signals":      enriched,
-        "errors":       errors,
+        "generated":       dt.datetime.now(SAST).isoformat(),
+        "ai_provider":     AI_PROVIDER,
+        "ai_model":        AI_MODEL,
+        "active_count":    len(enriched),
+        "signals":         enriched,
+        "market_snapshot": market_snapshot,
+        "errors":          errors,
     }

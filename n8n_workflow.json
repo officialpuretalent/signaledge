@@ -78,23 +78,26 @@
     },
     {
       "id": "7",
-      "name": "Log No-Signal Hour",
-      "type": "n8n-nodes-base.googleSheets",
+      "name": "Format No-Signal Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [1200, 420],
       "parameters": {
-        "operation":  "append",
-        "documentId": "={{ $env.GOOGLE_SHEET_ID }}",
-        "sheetName":  "Signal Log",
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "Timestamp": "={{ $now }}",
-            "Pair":      "no signal",
-            "Signal":    "none",
-            "Message":   "No active signals this hour"
-          }
-        }
+        "mode": "runOnceForAllItems",
+        "jsCode": "const raw = $input.first().json;\nconst snapshot = raw.market_snapshot || [];\n\nconst lines = snapshot.map(s => {\n  const ind = s.indicators || {};\n  const adx = ind.adx != null ? Number(ind.adx).toFixed(1) : '—';\n  const rsi = ind.rsi != null ? Number(ind.rsi).toFixed(1) : '—';\n  const diSpread = ind.di_spread != null ? Number(ind.di_spread).toFixed(1) : '—';\n  const trend = ind.adx >= 35 ? '🔥 Strong' : ind.adx >= 25 ? '📈 Moderate' : '😴 Weak';\n  const status = s.signal === 'duplicate' ? '🔁 Duplicate' : '⏸ No entry';\n  return `  *${s.pair}*  ADX ${adx} · RSI ${rsi} · DI-spread ${diSpread} · ${trend} · ${status}`;\n});\n\nconst generated = raw.generated ? raw.generated.replace('T', ' ').slice(0, 19) : '';\n\nconst text = [\n  '📊 *SignalEdge — Market Scan Complete*',\n  '',\n  '_No trade setups met entry criteria this hour._',\n  '',\n  '*Pair Snapshot:*',\n  ...lines,\n  '',\n  `📅 ${generated} SAST`,\n  '🤖 Signal Engine · Optimized',\n].join('\\n');\n\nreturn [{ json: { text, pair: 'ALL', signal: 'none' } }];"
       }
+    },
+    {
+      "id": "12",
+      "name": "Send No-Signal Alert",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1440, 420],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text":   "={{ $json.text }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "credentials": { "telegramApi": { "id": "1", "name": "Telegram Bot" } }
     },
     {
       "id": "8",
@@ -173,9 +176,15 @@
     },
     "Any signals found?": {
       "main": [
-        [{ "node": "Format Each Signal", "type": "main", "index": 0 }],
-        [{ "node": "Log No-Signal Hour", "type": "main", "index": 0 }]
+        [{ "node": "Format Each Signal",      "type": "main", "index": 0 }],
+        [{ "node": "Format No-Signal Message", "type": "main", "index": 0 }]
       ]
+    },
+    "Format No-Signal Message": {
+      "main": [[
+        { "node": "Send No-Signal Alert",  "type": "main", "index": 0 },
+        { "node": "Log to Google Sheets",  "type": "main", "index": 0 }
+      ]]
     },
     "Format Each Signal": {
       "main": [[
