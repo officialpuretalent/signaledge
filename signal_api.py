@@ -23,6 +23,9 @@ Error visibility:
 """
 
 import datetime as dt
+from zoneinfo import ZoneInfo
+
+SAST = ZoneInfo("Africa/Johannesburg")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,7 +53,7 @@ def health():
         "ai_provider": AI_PROVIDER,
         "ai_model":    AI_MODEL,
         "pairs":       len(LIVE_PAIRS),
-        "time":        dt.datetime.now().isoformat(),
+        "time":        dt.datetime.now(SAST).isoformat(),
     }
 
 
@@ -58,7 +61,7 @@ def health():
 def signals_all():
     results = get_signals()
     return {
-        "generated": dt.datetime.now().isoformat(),
+        "generated": dt.datetime.now(SAST).isoformat(),
         "count":     len(results),
         "signals":   results,
     }
@@ -69,7 +72,7 @@ def signals_active():
     results = get_signals()
     active  = [s for s in results if s["signal"] not in ("none", "error", "duplicate")]
     return {
-        "generated":    dt.datetime.now().isoformat(),
+        "generated":    dt.datetime.now(SAST).isoformat(),
         "active_count": len(active),
         "signals":      active,
     }
@@ -113,7 +116,7 @@ def signals_with_ai():
     })
 
     return {
-        "generated":    dt.datetime.now().isoformat(),
+        "generated":    dt.datetime.now(SAST).isoformat(),
         "ai_provider":  AI_PROVIDER,
         "ai_model":     AI_MODEL,
         "active_count": len(enriched),

@@ -15,6 +15,9 @@ Called by API:    from signal_engine import get_signals
 import json
 import datetime as dt
 from concurrent.futures import ThreadPoolExecutor
+from zoneinfo import ZoneInfo
+
+SAST = ZoneInfo("Africa/Johannesburg")
 
 import numpy as np
 import pandas as pd
@@ -191,7 +194,7 @@ def get_signals(pairs: list | None = None) -> list[dict]:
     if pairs is None:
         pairs = LIVE_PAIRS
 
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = dt.datetime.now(SAST).strftime("%Y-%m-%d %H:%M:%S")
     log.info("fetching_pairs", extra={"count": len(pairs)})
 
     # ── Phase 1: fetch all pairs concurrently ─────────────────────────────────
@@ -306,7 +309,7 @@ if __name__ == "__main__":
     from core.logging import setup_logging
     setup_logging()
 
-    log.info("starting", extra={"time": dt.datetime.now().strftime("%Y-%m-%d %H:%M")})
+    log.info("starting", extra={"time": dt.datetime.now(SAST).strftime("%Y-%m-%d %H:%M")})
     results = get_signals()
 
     active = [s for s in results if s["signal"] not in ("none", "error", "duplicate")]

@@ -139,7 +139,7 @@
       "position": [960, 480],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const errors = $input.first().json.errors || [];\nconst lines = errors.map(e => `  • ${e.pair}: ${e.error || 'unknown error'}`);\nconst text = `⚠️ *SignalEdge Data Feed Error*\\n\\nThe following pairs failed to fetch:\\n${lines.join('\\n')}\\n\\n📅 ${new Date().toISOString().replace('T',' ').slice(0,19)} UTC`;\nreturn [{ json: { text } }];"
+        "jsCode": "const errors = $input.first().json.errors || [];\nconst lines = errors.map(e => `  • ${e.pair}: ${e.error || 'unknown error'}`);\nconst sast = new Date().toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg', hour12: false }).replace(',', '');\nconst text = `⚠️ *SignalEdge Data Feed Error*\\n\\nThe following pairs failed to fetch:\\n${lines.join('\\n')}\\n\\n📅 ${sast} SAST`;\nreturn [{ json: { text } }];"
       }
     },
     {
