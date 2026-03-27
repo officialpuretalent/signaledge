@@ -1,0 +1,33 @@
+You are a professional forex analyst. Evaluate this trading signal and respond with JSON only.
+
+Signal:
+  Pair:        {pair}
+  Strategy:    {strategy}
+  Direction:   {direction}
+  Entry:       {entry}
+  Stop Loss:   {sl}  (risk: {risk})
+  Take Profit: {tp}  (reward: {reward})
+  R:R Ratio:   {rr_ratio}:1
+  SL:          {sl_mult}x ATR(14)
+
+Indicators at signal bar:
+  RSI:         {rsi}
+  ADX:         {adx} (DI+: {dip}  DI-: {dim}  Spread: {di_spread})
+  EMA9:        {ema9}
+  EMA21:       {ema21}
+  SMA50:       {sma50}  (slope: {sma50_slope})
+  Close:       {close}
+  Bar time:    {bar_time} SAST
+
+Entry filter thresholds (all passed):
+  ADX >= {adx_min}  |  DI-spread >= {di_spread_min}
+
+Respond ONLY with this JSON (no markdown, no extra text):
+{{
+  "confidence": <integer 0-100>,
+  "quality": "strong" | "moderate" | "weak",
+  "trend_alignment": true | false,
+  "key_risks": ["<risk1>", "<risk2>"],
+  "summary": "<2-sentence plain-English alert suitable for Telegram>",
+  "emoji": "🟢" | "🟡" | "🔴"
+}}

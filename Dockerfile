@@ -11,6 +11,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy source
 COPY signal_engine.py signal_api.py ./
+COPY ai/ ./ai/
+COPY core/ ./core/
+COPY prompts/ ./prompts/
 
 # Railway injects PORT — default to 8000
 ENV PORT=8000

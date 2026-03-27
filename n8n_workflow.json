@@ -21,16 +21,19 @@
         "method": "POST",
         "url": "={{ $env.SIGNAL_API_URL }}/signals/ai",
         "responseFormat": "json",
-        "options": { "timeout": 90000 }
+        "options": {
+          "timeout": 90000,
+          "onError": "continueErrorOutput"
+        }
       }
     },
     {
       "id": "3",
-      "name": "Filter to 3 test pairs",
+      "name": "Filter active signals",
       "type": "n8n-nodes-base.code",
       "position": [720, 300],
       "parameters": {
-        "jsCode": "const TEST_PAIRS = ['EUR/USD', 'USD/JPY', 'AUD/JPY'];\nconst raw = $input.first().json;\nconst filtered = (raw.signals || []).filter(s =>\n  TEST_PAIRS.includes(s.pair) && !['none','error'].includes(s.signal)\n);\nreturn [{ json: { ...raw, signals: filtered, active_count: filtered.length } }];"
+        "jsCode": "const ACTIVE_PAIRS = ['EUR/USD', 'USD/JPY', 'AUD/JPY', 'USD/CAD'];\nconst raw = $input.first().json;\nconst filtered = (raw.signals || []).filter(s =>\n  ACTIVE_PAIRS.includes(s.pair) && !['none','error','duplicate'].includes(s.signal)\n);\nreturn [{ json: { ...raw, signals: filtered, active_count: filtered.length } }];"
       }
     },
     {
@@ -71,10 +74,23 @@
     },
     {
       "id": "7",
-      "name": "No signals — log only",
-      "type": "n8n-nodes-base.noOp",
+      "name": "Log No-Signal Hour",
+      "type": "n8n-nodes-base.googleSheets",
       "position": [1200, 420],
-      "parameters": {}
+      "parameters": {
+        "operation":  "append",
+        "documentId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "sheetName":  "Signal Log",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $now }}",
+            "Pair":      "no signal",
+            "Signal":    "none",
+            "Message":   "No active signals this hour"
+          }
+        }
+      }
     },
     {
       "id": "8",
@@ -95,6 +111,42 @@
           }
         }
       }
+    },
+    {
+      "id": "9",
+      "name": "Any data errors?",
+      "type": "n8n-nodes-base.if",
+      "position": [720, 480],
+      "parameters": {
+        "conditions": {
+          "number": [{
+            "value1": "={{ ($json.errors || []).length }}",
+            "operation": "larger",
+            "value2": 0
+          }]
+        }
+      }
+    },
+    {
+      "id": "10",
+      "name": "Format Error Alert",
+      "type": "n8n-nodes-base.code",
+      "position": [960, 480],
+      "parameters": {
+        "jsCode": "const errors = $input.first().json.errors || [];\nconst lines = errors.map(e => `  • ${e.pair}: ${e.error || 'unknown error'}`);\nconst text = `⚠️ *SignalEdge Data Feed Error*\\n\\nThe following pairs failed to fetch:\\n${lines.join('\\n')}\\n\\n📅 ${new Date().toISOString().replace('T',' ').slice(0,19)} UTC`;\nreturn [{ json: { text } }];"
+      }
+    },
+    {
+      "id": "11",
+      "name": "Send Error Alert",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1200, 480],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text":   "={{ $json.text }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "credentials": { "telegramApi": { "id": "1", "name": "Telegram Bot" } }
     }
   ],
   "connections": {
@@ -102,15 +154,21 @@
       "main": [[{ "node": "Fetch Active Signals (AI scored)", "type": "main", "index": 0 }]]
     },
     "Fetch Active Signals (AI scored)": {
-      "main": [[{ "node": "Filter to 3 test pairs", "type": "main", "index": 0 }]]
+      "main": [[
+        { "node": "Filter active signals", "type": "main", "index": 0 },
+        { "node": "Any data errors?",      "type": "main", "index": 0 }
+      ]],
+      "error": [[
+        { "node": "Send Error Alert", "type": "main", "index": 0 }
+      ]]
     },
-    "Filter to 3 test pairs": {
+    "Filter active signals": {
       "main": [[{ "node": "Any signals found?", "type": "main", "index": 0 }]]
     },
     "Any signals found?": {
       "main": [
-        [{ "node": "Format Each Signal",    "type": "main", "index": 0 }],
-        [{ "node": "No signals — log only", "type": "main", "index": 0 }]
+        [{ "node": "Format Each Signal", "type": "main", "index": 0 }],
+        [{ "node": "Log No-Signal Hour", "type": "main", "index": 0 }]
       ]
     },
     "Format Each Signal": {
@@ -118,6 +176,15 @@
         { "node": "Send Telegram Alert",  "type": "main", "index": 0 },
         { "node": "Log to Google Sheets", "type": "main", "index": 0 }
       ]]
+    },
+    "Any data errors?": {
+      "main": [
+        [{ "node": "Format Error Alert", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Format Error Alert": {
+      "main": [[{ "node": "Send Error Alert", "type": "main", "index": 0 }]]
     }
   },
   "_meta": {
@@ -127,10 +194,10 @@
       "internal_url_format": "http://signal-api.railway.internal:8000"
     },
     "env_vars_required": {
-      "SIGNAL_API_URL":   "http://signal-api.railway.internal:8000  (Railway internal URL — set in n8n service)",
-      "ANTHROPIC_API_KEY":"Your Anthropic API key",
-      "TELEGRAM_CHAT_ID": "Your Telegram chat/channel ID",
-      "GOOGLE_SHEET_ID":  "Google Sheets document ID (optional)"
+      "SIGNAL_API_URL":    "http://signal-api.railway.internal:8000  (Railway internal URL — set in n8n service)",
+      "ANTHROPIC_API_KEY": "Your Anthropic API key",
+      "TELEGRAM_CHAT_ID":  "Your Telegram chat/channel ID",
+      "GOOGLE_SHEET_ID":   "Google Sheets document ID (optional)"
     },
     "notes": [
       "1. Deploy signal-api service on Railway from this repo (Dockerfile)",
@@ -140,7 +207,10 @@
       "5. Import this workflow file into n8n via Settings → Import",
       "6. Add Telegram Bot credentials in n8n Credentials",
       "7. Activate the workflow — it fires every hour on bar close",
-      "8. Test pairs: EUR/USD, USD/JPY, AUD/JPY (filtered in node 3)"
+      "8. Active pairs: EUR/USD, USD/JPY, AUD/JPY, USD/CAD (all 4 from signal engine)",
+      "9. Duplicate signals are filtered by the API — each setup alerts exactly once",
+      "10. Node 7 logs every no-signal hour to Google Sheets for full audit trail",
+      "11. Node 9-11 alert on yfinance data feed failures via Telegram"
     ]
   }
 }

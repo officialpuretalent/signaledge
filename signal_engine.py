@@ -14,9 +14,16 @@ Called by API:    from signal_engine import get_signals
 
 import json
 import datetime as dt
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+from core.logging import get_logger
+from core.deduplication import deduplicator
+
+log = get_logger(__name__)
 
 
 # ── Active pairs + optimized parameters ───────────────────────────────────────
@@ -54,6 +61,15 @@ def fetch(ticker: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     df_1h = df_1h[df_1h.index.dayofweek < 5]
     df_1d = df_1d[df_1d.index.dayofweek < 5]
     return df_1h, df_1d
+
+
+def _fetch_pair_data(pair_config: tuple) -> tuple[str, tuple | Exception]:
+    """Fetch data for one pair. Returns (ticker, (df_1h, df_1d)) or (ticker, Exception)."""
+    ticker = pair_config[0]
+    try:
+        return ticker, fetch(ticker)
+    except Exception as exc:
+        return ticker, exc
 
 
 # ── Indicators ────────────────────────────────────────────────────────────────
@@ -175,18 +191,34 @@ def get_signals(pairs: list | None = None) -> list[dict]:
     if pairs is None:
         pairs = LIVE_PAIRS
 
-    signals = []
-    now     = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _cache: dict[str, tuple] = {}
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log.info("fetching_pairs", extra={"count": len(pairs)})
 
+    # ── Phase 1: fetch all pairs concurrently ─────────────────────────────────
+    fetch_results: dict[str, tuple | Exception] = {}
+    with ThreadPoolExecutor(max_workers=min(len(pairs), 8)) as pool:
+        for ticker, result in pool.map(_fetch_pair_data, pairs):
+            fetch_results[ticker] = result
+
+    # ── Phase 2: compute indicators + evaluate signals (serial) ───────────────
+    signals = []
     for ticker, pair_name, strategy, adx_min, di_spread_min, sl_mult, rr_ratio in pairs:
+        result = fetch_results.get(ticker)
+
+        if isinstance(result, Exception):
+            log.error("fetch_failed", extra={"pair": pair_name, "error": str(result)})
+            signals.append({
+                "pair": pair_name, "ticker": ticker,
+                "strategy": strategy, "signal": "error",
+                "error": str(result), "generated": now,
+            })
+            continue
+
         try:
-            if ticker not in _cache:
-                _cache[ticker] = fetch(ticker)
-            df_1h, df_1d = _cache[ticker]
+            df_1h, df_1d = result
 
             if len(df_1h) < 60:
-                print(f"  {pair_name}: insufficient bars ({len(df_1h)}), skipping")
+                log.warning("insufficient_bars", extra={"pair": pair_name, "bars": len(df_1h)})
                 continue
 
             price_scale = float(df_1h["Close"].mean()) / 1.10
@@ -199,10 +231,10 @@ def get_signals(pairs: list | None = None) -> list[dict]:
             row  = df.iloc[-2]
             prev = df.iloc[-3]
 
-            signal = check_signal(strategy, row, prev, price_scale, adx_min, di_spread_min)
-
-            atr   = float(row["ATR14"])
-            entry = float(row["Close"])
+            signal   = check_signal(strategy, row, prev, price_scale, adx_min, di_spread_min)
+            bar_time = str(row.name)[:16]
+            atr      = float(row["ATR14"])
+            entry    = float(row["Close"])
 
             if signal == "long":
                 sl = entry - atr * sl_mult
@@ -213,11 +245,17 @@ def get_signals(pairs: list | None = None) -> list[dict]:
             else:
                 sl = tp = None
 
-            result = {
+            # Deduplication — mark as duplicate if this bar+signal was already alerted
+            is_duplicate = (
+                signal is not None
+                and not deduplicator.is_new(pair_name, signal, bar_time)
+            )
+
+            result_dict = {
                 "pair":     pair_name,
                 "ticker":   ticker,
                 "strategy": strategy,
-                "signal":   signal or "none",
+                "signal":   "duplicate" if is_duplicate else (signal or "none"),
                 "entry":    round(entry, 5) if signal else None,
                 "sl":       round(sl, 5)    if signal else None,
                 "tp":       round(tp, 5)    if signal else None,
@@ -229,31 +267,35 @@ def get_signals(pairs: list | None = None) -> list[dict]:
                     "rr_ratio":      rr_ratio,
                 },
                 "indicators": {
-                    "rsi":        round(float(row["RSI"]),   2),
-                    "adx":        round(float(row["ADX"]),   2),
-                    "dip":        round(float(row["DIP"]),   2),
-                    "dim":        round(float(row["DIM"]),   2),
-                    "di_spread":  round(abs(float(row["DIP"]) - float(row["DIM"])), 2),
-                    "ema9":       round(float(row["EMA9"]),  5),
-                    "ema21":      round(float(row["EMA21"]), 5),
-                    "sma50":      round(float(row["SMA50"]), 5),
-                    "sma50_slope":round(float(row["SMA50_slope"]), 8),
-                    "close":      round(entry, 5),
+                    "rsi":         round(float(row["RSI"]),         2),
+                    "adx":         round(float(row["ADX"]),         2),
+                    "dip":         round(float(row["DIP"]),         2),
+                    "dim":         round(float(row["DIM"]),         2),
+                    "di_spread":   round(abs(float(row["DIP"]) - float(row["DIM"])), 2),
+                    "ema9":        round(float(row["EMA9"]),        5),
+                    "ema21":       round(float(row["EMA21"]),       5),
+                    "sma50":       round(float(row["SMA50"]),       5),
+                    "sma50_slope": round(float(row["SMA50_slope"]), 8),
+                    "close":       round(entry,                     5),
                 },
-                "bar_time":  str(row.name)[:16],
+                "bar_time":  bar_time,
                 "generated": now,
             }
-            signals.append(result)
+            signals.append(result_dict)
 
-            status = f"[{signal.upper()}]" if signal else "[none]"
-            print(f"  {pair_name:<12} {strategy:<22} ADX={result['indicators']['adx']:.1f}  {status}")
+            log.info("signal_evaluated", extra={
+                "pair":     pair_name,
+                "strategy": strategy,
+                "signal":   result_dict["signal"],
+                "adx":      result_dict["indicators"]["adx"],
+            })
 
-        except Exception as e:
-            print(f"  {pair_name}: ERROR — {e}")
+        except Exception as exc:
+            log.error("signal_error", extra={"pair": pair_name, "error": str(exc)}, exc_info=True)
             signals.append({
                 "pair": pair_name, "ticker": ticker,
                 "strategy": strategy, "signal": "error",
-                "error": str(e), "generated": now,
+                "error": str(exc), "generated": now,
             })
 
     return signals
@@ -261,13 +303,14 @@ def get_signals(pairs: list | None = None) -> list[dict]:
 
 # ── Standalone run ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print(f"\nSignalEdge — {dt.datetime.now().strftime('%Y-%m-%d %H:%M')} SAST")
-    print("=" * 58)
-    results = get_signals()
-    print("=" * 58)
+    from core.logging import setup_logging
+    setup_logging()
 
-    active = [s for s in results if s["signal"] not in ("none", "error")]
-    print(f"\nActive signals: {len(active)}/{len(results)}")
+    log.info("starting", extra={"time": dt.datetime.now().strftime("%Y-%m-%d %H:%M")})
+    results = get_signals()
+
+    active = [s for s in results if s["signal"] not in ("none", "error", "duplicate")]
+    log.info("complete", extra={"active": len(active), "total": len(results)})
 
     for s in active:
         p = s["params"]
@@ -281,6 +324,8 @@ if __name__ == "__main__":
 
     out = "signals_latest.json"
     with open(out, "w") as f:
-        json.dump({"generated": results[0]["generated"] if results else "",
-                   "signals":   results}, f, indent=2)
+        json.dump({
+            "generated": results[0]["generated"] if results else "",
+            "signals":   results,
+        }, f, indent=2)
     print(f"\nSaved → {out}")
