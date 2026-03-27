@@ -96,7 +96,7 @@ def add_indicators(df: pd.DataFrame, df_daily: pd.DataFrame,
         lambda x: np.polyfit(range(len(x)), x, 1)[0], raw=True
     )
 
-    daily_sma200 = df_daily["Close"].rolling(200).mean()
+    daily_sma200 = df_daily["Close"].squeeze().rolling(200).mean()
     d["SMA200D"] = daily_sma200.reindex(d.index, method="ffill")
 
     d["EMA9"]  = d["Close"].ewm(span=9,  adjust=False).mean()
