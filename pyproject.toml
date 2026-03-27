@@ -1,0 +1,18 @@
+[project]
+name = "signaledge"
+version = "2.0.0"
+description = "Optimized forex signal engine with multi-provider AI scoring"
+requires-python = ">=3.12"
+dependencies = [
+    # API server
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    # Data & indicators
+    "yfinance>=1.2.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    # AI providers (all optional at runtime — only the active one is imported)
+    "anthropic>=0.40.0",
+    "openai>=1.50.0",
+    "google-genai>=1.0.0",
+]

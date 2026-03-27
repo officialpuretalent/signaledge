@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[oc]
+.venv/
+.python-version
+
+# Runtime outputs
+signals_latest.json
+
+# Environment
+.env
+.env.local

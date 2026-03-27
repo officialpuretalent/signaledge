@@ -1,0 +1,146 @@
+{
+  "name": "Forex Signal Engine",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Every Hour (on bar close)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "minutesInterval": 1 }]
+        }
+      }
+    },
+    {
+      "id": "2",
+      "name": "Fetch Active Signals (AI scored)",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [480, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SIGNAL_API_URL }}/signals/ai",
+        "responseFormat": "json",
+        "options": { "timeout": 90000 }
+      }
+    },
+    {
+      "id": "3",
+      "name": "Filter to 3 test pairs",
+      "type": "n8n-nodes-base.code",
+      "position": [720, 300],
+      "parameters": {
+        "jsCode": "const TEST_PAIRS = ['EUR/USD', 'USD/JPY', 'AUD/JPY'];\nconst raw = $input.first().json;\nconst filtered = (raw.signals || []).filter(s =>\n  TEST_PAIRS.includes(s.pair) && !['none','error'].includes(s.signal)\n);\nreturn [{ json: { ...raw, signals: filtered, active_count: filtered.length } }];"
+      }
+    },
+    {
+      "id": "4",
+      "name": "Any signals found?",
+      "type": "n8n-nodes-base.if",
+      "position": [960, 300],
+      "parameters": {
+        "conditions": {
+          "number": [{
+            "value1": "={{ $json.active_count }}",
+            "operation": "larger",
+            "value2": 0
+          }]
+        }
+      }
+    },
+    {
+      "id": "5",
+      "name": "Format Each Signal",
+      "type": "n8n-nodes-base.code",
+      "position": [1200, 200],
+      "parameters": {
+        "jsCode": "const signals = $input.first().json.signals;\nconst messages = [];\n\nfor (const s of signals) {\n  const ai     = s.ai || {};\n  const params = s.params || {};\n  const emoji  = ai.emoji || '📊';\n  const conf   = ai.confidence != null ? `${ai.confidence}%` : '—';\n  const quality = ai.quality || '—';\n  const risks  = (ai.key_risks || []).map(r => `  • ${r}`).join('\\n');\n  const rr     = params.rr_ratio || 2.5;\n  const direction = s.signal === 'long' ? '🟢 LONG' : '🔴 SHORT';\n\n  const msg = [\n    `${emoji} *${s.pair}* — ${direction}`,\n    `Strategy: \\`${s.strategy}\\``,\n    ``,\n    `Entry:  \\`${s.entry}\\``,\n    `SL:     \\`${s.sl}\\`  (${params.sl_mult || 2}× ATR)`,\n    `TP:     \\`${s.tp}\\`  (${rr}R)`,\n    ``,\n    `Indicators: ADX ${s.indicators?.adx} · DI-spread ${s.indicators?.di_spread} · RSI ${s.indicators?.rsi}`,\n    `Params: ADX≥${params.adx_min} · DI-spread≥${params.di_spread_min}`,\n    ``,\n    `AI Confidence: *${conf}* (${quality})`,\n    ai.summary ? `💬 ${ai.summary}` : '',\n    risks ? `\\n⚠️ Risks:\\n${risks}` : '',\n    ``,\n    `📅 Bar: ${s.bar_time} SAST`,\n    `🤖 Signal Engine · Optimized`,\n  ].filter(Boolean).join('\\n');\n\n  messages.push({ json: { text: msg, pair: s.pair, signal: s.signal } });\n}\n\nreturn messages;"
+      }
+    },
+    {
+      "id": "6",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "position": [1440, 200],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text":   "={{ $json.text }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "credentials": { "telegramApi": { "id": "1", "name": "Telegram Bot" } }
+    },
+    {
+      "id": "7",
+      "name": "No signals — log only",
+      "type": "n8n-nodes-base.noOp",
+      "position": [1200, 420],
+      "parameters": {}
+    },
+    {
+      "id": "8",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [1440, 320],
+      "parameters": {
+        "operation":  "append",
+        "documentId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "sheetName":  "Signal Log",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp":  "={{ $now }}",
+            "Pair":       "={{ $json.pair }}",
+            "Signal":     "={{ $json.signal }}",
+            "Message":    "={{ $json.text }}"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Hour (on bar close)": {
+      "main": [[{ "node": "Fetch Active Signals (AI scored)", "type": "main", "index": 0 }]]
+    },
+    "Fetch Active Signals (AI scored)": {
+      "main": [[{ "node": "Filter to 3 test pairs", "type": "main", "index": 0 }]]
+    },
+    "Filter to 3 test pairs": {
+      "main": [[{ "node": "Any signals found?", "type": "main", "index": 0 }]]
+    },
+    "Any signals found?": {
+      "main": [
+        [{ "node": "Format Each Signal",    "type": "main", "index": 0 }],
+        [{ "node": "No signals — log only", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Each Signal": {
+      "main": [[
+        { "node": "Send Telegram Alert",  "type": "main", "index": 0 },
+        { "node": "Log to Google Sheets", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "_meta": {
+    "railway_deployment": {
+      "signal_api_service": "signal-api",
+      "n8n_service": "n8n",
+      "internal_url_format": "http://signal-api.railway.internal:8000"
+    },
+    "env_vars_required": {
+      "SIGNAL_API_URL":   "http://signal-api.railway.internal:8000  (Railway internal URL — set in n8n service)",
+      "ANTHROPIC_API_KEY":"Your Anthropic API key",
+      "TELEGRAM_CHAT_ID": "Your Telegram chat/channel ID",
+      "GOOGLE_SHEET_ID":  "Google Sheets document ID (optional)"
+    },
+    "notes": [
+      "1. Deploy signal-api service on Railway from this repo (Dockerfile)",
+      "2. Deploy n8n using image: n8nio/n8n:latest with volume at /home/node/.n8n",
+      "3. Set SIGNAL_API_URL to the Railway internal URL (not the public URL)",
+      "4. Set ANTHROPIC_API_KEY, TELEGRAM_CHAT_ID on the n8n service",
+      "5. Import this workflow file into n8n via Settings → Import",
+      "6. Add Telegram Bot credentials in n8n Credentials",
+      "7. Activate the workflow — it fires every hour on bar close",
+      "8. Test pairs: EUR/USD, USD/JPY, AUD/JPY (filtered in node 3)"
+    ]
+  }
+}
