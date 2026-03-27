@@ -48,6 +48,7 @@ LIVE_PAIRS = [
 def _clean(raw: pd.DataFrame) -> pd.DataFrame:
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)
+    raw = raw.loc[:, ~raw.columns.duplicated()]
     if raw.index.tz is None:
         raw.index = raw.index.tz_localize("UTC").tz_convert("Africa/Johannesburg").tz_localize(None)
     else:
