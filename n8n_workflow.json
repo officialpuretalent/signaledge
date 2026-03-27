@@ -122,16 +122,12 @@
     {
       "id": "9",
       "name": "Any data errors?",
-      "type": "n8n-nodes-base.if",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [720, 480],
       "parameters": {
-        "conditions": {
-          "number": [{
-            "value1": "={{ ($json.errors || []).length }}",
-            "operation": "larger",
-            "value2": 0
-          }]
-        }
+        "mode": "runOnceForAllItems",
+        "jsCode": "const raw = $input.first().json;\nconst errors = raw.errors || [];\nif (errors.length === 0) return [];\nreturn [{ json: raw }];"
       }
     },
     {
@@ -193,10 +189,7 @@
       ]]
     },
     "Any data errors?": {
-      "main": [
-        [{ "node": "Format Error Alert", "type": "main", "index": 0 }],
-        []
-      ]
+      "main": [[{ "node": "Format Error Alert", "type": "main", "index": 0 }]]
     },
     "Format Error Alert": {
       "main": [[{ "node": "Send Error Alert", "type": "main", "index": 0 }]]
