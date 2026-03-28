@@ -19,6 +19,12 @@ Indicators at signal bar:
   Close:       {close}
   Bar time:    {bar_time} SAST
 
+Market regime:
+  State:      {regime_state}  (trending | ranging | high-uncertainty)
+  ATR ratio:  {atr_ratio}    (current ATR14 / 20-bar mean; > 1.5 = extreme volatility)
+  Risk tier:  {risk_tier}    (1 = highest edge, 3 = lowest)
+  Risk pct:   {risk_pct}%    (after regime risk_mult {risk_mult}x applied)
+
 Entry filter thresholds (all passed):
   ADX >= {adx_min}  |  DI-spread >= {di_spread_min}
 

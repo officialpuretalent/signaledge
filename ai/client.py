@@ -81,6 +81,11 @@ def _build_prompt(sig: dict) -> str:
         bar_time=sig["bar_time"],
         adx_min=p["adx_min"],
         di_spread_min=p["di_spread_min"],
+        regime_state=sig.get("regime", {}).get("state", "unknown"),
+        atr_ratio=sig.get("regime", {}).get("atr_ratio", "N/A"),
+        risk_mult=sig.get("regime", {}).get("risk_mult", 1.0),
+        risk_tier=sig.get("risk_tier", 0),
+        risk_pct=sig.get("risk_pct", "N/A"),
     )
 
 

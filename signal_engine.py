@@ -25,6 +25,7 @@ import yfinance as yf
 
 from core.logging import get_logger
 from core.deduplication import deduplicator
+from core.regime import classify_regime
 
 log = get_logger(__name__)
 
@@ -42,6 +43,18 @@ LIVE_PAIRS = [
     ("AUDJPY=X", "AUD/JPY", "ema_cross",        20,  5,  2.5, 2.5),  # 1.31  20.4%
     ("USDCAD=X", "USD/CAD", "ema_cross",        35,  0,  2.5, 2.5),  # 1.11   9.9%
 ]
+
+# ── Strategy tiers + base risk allocation ─────────────────────────────────────
+# Tier 1 (best edge): 2% base risk
+# Tier 2 (medium):    1.5% base risk
+# Tier 3 (lower):     1% base risk
+# Final risk_pct = base_risk_pct × regime.risk_mult × system_state.risk_mult
+PAIR_TIERS: dict[str, dict] = {
+    "EUR/USD": {"tier": 1, "base_risk_pct": 2.0},
+    "USD/JPY": {"tier": 2, "base_risk_pct": 1.5},
+    "AUD/JPY": {"tier": 3, "base_risk_pct": 1.0},
+    "USD/CAD": {"tier": 3, "base_risk_pct": 1.0},
+}
 
 
 # ── Data fetch ────────────────────────────────────────────────────────────────
@@ -94,7 +107,8 @@ def add_indicators(df: pd.DataFrame, df_daily: pd.DataFrame,
         (d["High"] - d["Close"].shift(1)).abs(),
         (d["Low"]  - d["Close"].shift(1)).abs(),
     ], axis=1).max(axis=1)
-    d["ATR14"] = tr.rolling(14).mean()
+    d["ATR14"]   = tr.rolling(14).mean()
+    d["ATR20avg"] = d["ATR14"].rolling(20).mean()  # 20-bar ATR mean for regime volatility filter
 
     d["SMA50_slope"] = d["SMA50"].rolling(10).apply(
         lambda x: np.polyfit(range(len(x)), x, 1)[0], raw=True
@@ -141,8 +155,9 @@ def check_signal(strategy: str, row: pd.Series, prev: pd.Series,
         if di_spread  < di_spread_min: return None
         up = prev["EMA9"] < prev["EMA21"] and row["EMA9"] >= row["EMA21"]
         dn = prev["EMA9"] > prev["EMA21"] and row["EMA9"] <= row["EMA21"]
-        if up and row["Close"] > row["SMA50"] and row["DIP"] > row["DIM"]: return "long"
-        if dn and row["Close"] < row["SMA50"] and row["DIM"] > row["DIP"]: return "short"
+        # Tier 1 filter: require RSI momentum alignment
+        if up and row["Close"] > row["SMA50"] and row["DIP"] > row["DIM"] and row["RSI"] > 50: return "long"
+        if dn and row["Close"] < row["SMA50"] and row["DIM"] > row["DIP"] and row["RSI"] < 50: return "short"
 
     elif strategy == "rsi_momentum":
         if row.name.dayofweek == 3: return None          # skip Thursday
@@ -160,8 +175,11 @@ def check_signal(strategy: str, row: pd.Series, prev: pd.Series,
         if di_spread  < di_spread_min: return None
         up = prev["EMA9"] < prev["EMA21"] and row["EMA9"] >= row["EMA21"]
         dn = prev["EMA9"] > prev["EMA21"] and row["EMA9"] <= row["EMA21"]
-        if up and row["Close"] > row["SMA50"]: return "long"
-        if dn and row["Close"] < row["SMA50"]: return "short"
+        # Tier 3 filters: RSI alignment + SMA200D trend confirmation (guard for NaN)
+        above_200d = not pd.notna(row["SMA200D"]) or row["Close"] > row["SMA200D"]
+        below_200d = not pd.notna(row["SMA200D"]) or row["Close"] < row["SMA200D"]
+        if up and row["Close"] > row["SMA50"] and row["RSI"] > 50 and above_200d: return "long"
+        if dn and row["Close"] < row["SMA50"] and row["RSI"] < 50 and below_200d: return "short"
 
     elif strategy == "rsi_sma_refined":
         if row["ADX"] < adx_min:   return None
@@ -231,6 +249,9 @@ def get_signals(pairs: list | None = None) -> list[dict]:
             if len(df) < 3:
                 continue
 
+            regime    = classify_regime(df)
+            tier_info = PAIR_TIERS.get(pair_name, {"tier": 0, "base_risk_pct": 1.0})
+
             # Use the last two COMPLETED bars (-1 may be in-progress mid-hour)
             row  = df.iloc[-2]
             prev = df.iloc[-3]
@@ -284,6 +305,9 @@ def get_signals(pairs: list | None = None) -> list[dict]:
                 },
                 "bar_time":  bar_time,
                 "generated": now,
+                "regime":    regime,
+                "risk_tier": tier_info["tier"],
+                "risk_pct":  round(tier_info["base_risk_pct"] * regime["risk_mult"], 4),
             }
             signals.append(result_dict)
 
