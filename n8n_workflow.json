@@ -8,7 +8,12 @@
       "position": [240, 300],
       "parameters": {
         "rule": {
-          "interval": [{ "field": "hours", "minutesInterval": 1 }]
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * 1-5"
+            }
+          ]
         }
       }
     },
@@ -91,7 +96,7 @@
       "position": [1200, 420],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const raw = $input.first().json;\nconst snapshot = raw.market_snapshot || [];\n\nconst lines = snapshot.map(s => {\n  const ind = s.indicators || {};\n  const adx = ind.adx != null ? Number(ind.adx).toFixed(1) : '—';\n  const rsi = ind.rsi != null ? Number(ind.rsi).toFixed(1) : '—';\n  const diSpread = ind.di_spread != null ? Number(ind.di_spread).toFixed(1) : '—';\n  const trend = ind.adx >= 35 ? '🔥 Strong' : ind.adx >= 25 ? '📈 Moderate' : '😴 Weak';\n  const status = s.signal === 'duplicate' ? '🔁 Duplicate' : '⏸ No entry';\n  return `  *${s.pair}*  ADX ${adx} · RSI ${rsi} · DI-spread ${diSpread} · ${trend} · ${status}`;\n});\n\nconst generated = raw.generated ? raw.generated.replace('T', ' ').slice(0, 19) : '';\n\nconst text = [\n  '📊 *SignalEdge — Market Scan Complete*',\n  '',\n  '_No trade setups met entry criteria this hour._',\n  '',\n  '*Pair Snapshot:*',\n  ...lines,\n  '',\n  `📅 ${generated} SAST`,\n  '🤖 Signal Engine · Optimized',\n].join('\\n');\n\nreturn [{ json: { text, pair: 'ALL', signal: 'none' } }];"
+        "jsCode": "const raw = $input.first().json;\nconst snapshot = raw.market_snapshot || [];\n\nconst lines = snapshot.map(s => {\n  if (s.signal === 'error') {\n    return `  *${s.pair}*  ⚠️ Data feed error`;\n  }\n  const ind = s.indicators || {};\n  const adx = ind.adx != null ? Number(ind.adx).toFixed(1) : '—';\n  const rsi = ind.rsi != null ? Number(ind.rsi).toFixed(1) : '—';\n  const diSpread = ind.di_spread != null ? Number(ind.di_spread).toFixed(1) : '—';\n  const trend = ind.adx >= 35 ? '🔥 Strong' : ind.adx >= 25 ? '📈 Moderate' : '😴 Weak';\n  const status = s.signal === 'duplicate' ? '🔁 Duplicate' : '⏸ No entry';\n  return `  *${s.pair}*  ADX ${adx} · RSI ${rsi} · DI-spread ${diSpread} · ${trend} · ${status}`;\n});\n\nconst generated = raw.generated ? raw.generated.replace('T', ' ').slice(0, 19) : '';\n\nconst text = [\n  '📊 *SignalEdge — Market Scan Complete*',\n  '',\n  '_No trade setups met entry criteria this hour._',\n  '',\n  '*Pair Snapshot:*',\n  ...lines,\n  '',\n  `📅 ${generated} SAST`,\n  '🤖 Signal Engine · Optimized',\n].join('\\n');\n\nreturn [{ json: { text, pair: 'ALL', signal: 'none' } }];"
       }
     },
     {
@@ -145,7 +150,7 @@
       "position": [960, 480],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const errors = $input.first().json.errors || [];\nconst lines = errors.map(e => `  • ${e.pair}: ${e.error || 'unknown error'}`);\nconst sast = new Date().toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg', hour12: false }).replace(',', '');\nconst text = `⚠️ *SignalEdge Data Feed Error*\\n\\nThe following pairs failed to fetch:\\n${lines.join('\\n')}\\n\\n📅 ${sast} SAST`;\nreturn [{ json: { text } }];"
+        "jsCode": "const raw = $input.first().json;\nconst errors = raw.errors || [];\nlet lines;\nif (errors.length > 0) {\n  lines = errors.map(e => `  • ${e.pair}: ${e.error || 'unknown error'}`);\n} else {\n  lines = [`  • API unreachable: ${raw.message || raw.error || 'connection failed'}`];\n}\nconst sast = new Date().toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg', hour12: false }).replace(',', '');\nconst text = `⚠️ *SignalEdge API Error*\\n\\nThe signal engine could not be reached:\\n${lines.join('\\n')}\\n\\n📅 ${sast} SAST`;\nreturn [{ json: { text } }];"
       }
     },
     {
@@ -167,11 +172,10 @@
     },
     "Fetch Active Signals (AI scored)": {
       "main": [[
-        { "node": "Filter active signals", "type": "main", "index": 0 },
-        { "node": "Any data errors?",      "type": "main", "index": 0 }
+        { "node": "Filter active signals", "type": "main", "index": 0 }
       ]],
       "error": [[
-        { "node": "Send Error Alert", "type": "main", "index": 0 }
+        { "node": "Format Error Alert", "type": "main", "index": 0 }
       ]]
     },
     "Filter active signals": {
@@ -197,9 +201,6 @@
         { "node": "Send Telegram Alert",  "type": "main", "index": 0 },
         { "node": "Log to Google Sheets", "type": "main", "index": 0 }
       ]]
-    },
-    "Any data errors?": {
-      "main": [[{ "node": "Format Error Alert", "type": "main", "index": 0 }]]
     },
     "Format Error Alert": {
       "main": [[{ "node": "Send Error Alert", "type": "main", "index": 0 }]]
@@ -227,8 +228,8 @@
       "7. Activate the workflow — it fires every hour on bar close",
       "8. Active pairs: EUR/USD, USD/JPY, AUD/JPY, USD/CAD (all 4 from signal engine)",
       "9. Duplicate signals are filtered by the API — each setup alerts exactly once",
-      "10. Node 7 logs every no-signal hour to Google Sheets for full audit trail",
-      "11. Node 9-11 alert on yfinance data feed failures via Telegram"
+      "10. No-signal message shows all pairs including any with data feed errors (single message)",
+      "11. Nodes 10-11 only fire on complete API failure (HTTP error), not partial yfinance errors"
     ]
   }
 }
