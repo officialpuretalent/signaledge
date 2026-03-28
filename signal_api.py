@@ -29,10 +29,12 @@ SAST = ZoneInfo("Africa/Johannesburg")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from signal_engine import get_signals, LIVE_PAIRS
 from ai import score_signal, AI_PROVIDER, AI_MODEL
 from core.logging import get_logger
+from core.performance_tracker import performance_tracker
 
 log = get_logger(__name__)
 
@@ -89,14 +91,41 @@ def signal_single(pair_slug: str):
     return results[0] if results else {}
 
 
+class TradeRecord(BaseModel):
+    pair:       str
+    direction:  str   # 'long' | 'short'
+    r_multiple: float
+    risk_pct:   float = 0.0  # informational; stored for context
+
+
 @app.post("/signals/ai")
 def signals_with_ai():
     """
     Return only NEW (non-duplicate) active signals, each enriched with AI scoring.
     Also surfaces any data feed errors in the `errors` field for n8n routing.
 
+    Signals with AI confidence < 70 are moved to `signals_gated` (not sent to n8n).
+    If the performance tracker is in observation mode, `signals` is empty and
+    `system_mode` will be "observation" so n8n can alert accordingly.
+
     Set AI_PROVIDER = anthropic | openai | gemini
     """
+    # Forex market is closed on weekends — skip signal evaluation entirely
+    now_sast = dt.datetime.now(SAST)
+    if now_sast.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        log.info("weekend_skip", extra={"day": now_sast.strftime("%A")})
+        return {
+            "generated":       now_sast.isoformat(),
+            "ai_provider":     AI_PROVIDER,
+            "ai_model":        AI_MODEL,
+            "system_mode":     "weekend",
+            "active_count":    0,
+            "signals":         [],
+            "signals_gated":   [],
+            "market_snapshot": [],
+            "errors":          [],
+        }
+
     results = get_signals()
 
     # Surface data feed errors so n8n can alert on them
@@ -104,26 +133,84 @@ def signals_with_ai():
     if errors:
         log.warning("data_feed_errors", extra={"pairs": [e["pair"] for e in errors]})
 
-    # Only new, non-duplicate active signals get AI-scored and returned
-    new_signals = [s for s in results if s["signal"] not in ("none", "error", "duplicate")]
+    # All pairs — used by n8n for the no-signal market summary
+    market_snapshot = results
 
-    enriched = [{**s, "ai": score_signal(s)} for s in new_signals]
+    # Check system health — pause all signals in observation mode
+    system_state = performance_tracker.get_system_state()
+
+    if system_state["mode"] == "observation":
+        log.warning("system_observation_mode", extra={"reason": system_state["reason"]})
+        return {
+            "generated":       dt.datetime.now(SAST).isoformat(),
+            "ai_provider":     AI_PROVIDER,
+            "ai_model":        AI_MODEL,
+            "system_mode":     "observation",
+            "system_state":    system_state,
+            "active_count":    0,
+            "signals":         [],
+            "signals_gated":   [],
+            "market_snapshot": market_snapshot,
+            "errors":          errors,
+        }
+
+    # Only new, non-duplicate active signals get AI-scored
+    new_signals = [s for s in results if s["signal"] not in ("none", "error", "duplicate")]
+    scored      = [{**s, "ai": score_signal(s)} for s in new_signals]
+
+    # Confidence gate: only signals with AI confidence >= 70 go to n8n
+    signals_passed = [s for s in scored if (s["ai"].get("confidence") or 0) >= 70]
+    signals_gated  = [s for s in scored if (s["ai"].get("confidence") or 0) <  70]
 
     log.info("signals_with_ai_complete", extra={
         "total":   len(results),
         "new":     len(new_signals),
+        "passed":  len(signals_passed),
+        "gated":   len(signals_gated),
         "errors":  len(errors),
     })
-
-    # All pairs including none/duplicate — used by n8n for the no-signal market summary
-    market_snapshot = [s for s in results if s["signal"] != "error"]
 
     return {
         "generated":       dt.datetime.now(SAST).isoformat(),
         "ai_provider":     AI_PROVIDER,
         "ai_model":        AI_MODEL,
-        "active_count":    len(enriched),
-        "signals":         enriched,
+        "system_mode":     system_state["mode"],
+        "active_count":    len(signals_passed),
+        "signals":         signals_passed,
+        "signals_gated":   signals_gated,
         "market_snapshot": market_snapshot,
         "errors":          errors,
+    }
+
+
+@app.get("/status")
+def system_status():
+    """System health: performance tracker state and rolling trade stats."""
+    state = performance_tracker.get_system_state()
+    return {
+        "generated":    dt.datetime.now(SAST).isoformat(),
+        "system_state": state,
+        "recent_trades": performance_tracker.recent_trades(20),
+    }
+
+
+@app.post("/trades/record")
+def record_trade(body: TradeRecord):
+    """
+    Record a closed trade result for performance tracking.
+
+    n8n or your broker webhook should POST here after each trade closes.
+    The performance tracker uses r_multiple to compute rolling win rate,
+    profit factor, and drawdown state.
+    """
+    performance_tracker.log_trade(body.pair, body.direction, body.r_multiple)
+    log.info("trade_recorded", extra={
+        "pair":       body.pair,
+        "direction":  body.direction,
+        "r_multiple": body.r_multiple,
+    })
+    state = performance_tracker.get_system_state()
+    return {
+        "recorded":     True,
+        "system_state": state,
     }
